@@ -1,0 +1,34 @@
+newmtl Green
+Kd 0 0.74902 0.184314
+Ke 0 0 0
+Ka 0 0 0
+Ks 0.5 0.5 0.5
+Ns 400
+Tr 0
+d 1
+Ni 1.5
+Tf 1 1 1
+
+newmtl Purple
+Kd 0.74902 0 0.564706
+Ke 0 0 0
+Ka 0 0 0
+Ks 0.5 0.5 0.5
+Ns 400
+Tr 0
+d 1
+Ni 1.5
+Tf 1 1 1
+
+newmtl TEXTURE
+Kd 0.502 0 0
+Ke 0 0 0
+Ka 0.95 0.95 0.95
+Ks 0.05 0.05 0.05
+Ns 500
+Tr 0
+d 1
+Ni 1.5
+Tf 1 1 1
+map_Kd F:Hub75_Projects/COBRA_EXPORT_64.bmp
+

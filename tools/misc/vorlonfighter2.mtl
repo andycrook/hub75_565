@@ -1,0 +1,121 @@
+newmtl PetalCutaway
+Kd 0.45098 0.443137 0.435294
+Ke 0 0 0
+Ka 1 1 1
+Ks 0.41 0.41 0.41
+Ns 400
+Tr 0
+d 1
+Ni 1
+Tf 1 1 1
+
+newmtl Petaledge
+Kd 0.415686 0.411765 0.403922
+Ke 0 0 0
+Ka 1 1 1
+Ks 0.26 0.26 0.26
+Ns 400
+Tr 0
+d 1
+Ni 1
+Tf 1 1 1
+
+newmtl PetalInside
+Kd 0 0 0
+Ke 1 1 1
+Ka 1 1 1
+Ks 0 0 0
+Ns 400
+Tr 0
+d 1
+Ni 1
+Tf 1 1 1
+
+newmtl PetalSpine
+Kd 1 1 0.286275
+Ke 0 0 0
+Ka 1 1 1
+Ks 0.6 0.6 0.6
+Ns 400
+Tr 0
+d 1
+Ni 1
+Tf 1 1 1
+
+newmtl Petalweb
+Kd 1 1 0.286275
+Ke 0 0 0
+Ka 1 1 1
+Ks 0.6 0.6 0.6
+Ns 400
+Tr 0
+d 1
+Ni 1
+Tf 1 1 1
+
+newmtl PetalY
+Kd 1 1 0.286275
+Ke 0 0 0
+Ka 1 1 1
+Ks 0.6 0.6 0.6
+Ns 400
+Tr 0
+d 1
+Ni 1
+Tf 1 1 1
+
+newmtl VorFighScoop
+Kd 0.882353 0.882353 0.0784314
+Ke 0 0 0
+Ka 1 1 1
+Ks 0 0 0
+Ns 400
+Tr 0
+d 1
+Ni 1
+Tf 1 1 1
+
+newmtl Vorlonblack
+Kd 0 0 0
+Ke 0 0 0
+Ka 1 1 1
+Ks 0 0 0
+Ns 400
+Tr 0
+d 1
+Ni 1
+Tf 1 1 1
+
+newmtl VorlonEXhaust
+Kd 1 0.741176 0.462745
+Ke 1 1 1
+Ka 1 1 1
+Ks 0 0 0
+Ns 400
+Tr 0
+d 1
+Ni 1
+Tf 1 1 1
+
+newmtl VorlonGrey
+Kd 0.443137 0.439216 0.435294
+Ke 0 0 0
+Ka 1 1 1
+Ks 0.6 0.6 0.6
+Ns 400
+Tr 0
+d 1
+Ni 1
+Tf 1 1 1
+
+newmtl VorlonYellow
+Kd 1 1 0.286275
+Ke 0 0 0
+Ka 1 1 1
+Ks 0.6 0.6 0.6
+Ns 400
+Tr 0
+d 1
+Ni 1
+Tf 1 1 1
+
