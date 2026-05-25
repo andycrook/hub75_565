@@ -719,19 +719,23 @@ class FontGUI:
         ttk.Label(zoomf, textvariable=self.zoom_var, style="App.TLabel", anchor="center").grid(row=0, column=1, sticky="ew")
         ttk.Button(zoomf, text="+", command=lambda:self.change_zoom(+1), style="Tool.TButton").grid(row=0, column=2, sticky="ew", padx=(8, 0))
 
-        widthf = ttk.LabelFrame(tools, text="Glyph Width", style="App.TLabelframe", padding=(8, 8))
-        widthf.grid(row=2, column=0, sticky="ew", pady=(0, 8))
-        widthf.columnconfigure(0, weight=1)
-        widthf.columnconfigure(1, weight=1)
-        ttk.Button(widthf, text="Width -", command=lambda:self.change_width(-1), style="Tool.TButton").grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        ttk.Button(widthf, text="Width +", command=lambda:self.change_width(+1), style="Tool.TButton").grid(row=0, column=1, sticky="ew")
+        dimf = ttk.LabelFrame(tools, text="Glyph Dimensions", style="App.TLabelframe", padding=(8, 8))
+        dimf.grid(row=2, column=0, sticky="ew", pady=(0, 8))
+        dimf.columnconfigure(0, weight=1)
+        dimf.columnconfigure(1, weight=1)
+        ttk.Button(dimf, text="Width -", command=lambda:self.change_width(-1), style="Tool.TButton").grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ttk.Button(dimf, text="Width +", command=lambda:self.change_width(+1), style="Tool.TButton").grid(row=0, column=1, sticky="ew")
+        ttk.Button(dimf, text="Height -", command=lambda:self.change_height(-1), style="Tool.TButton").grid(row=1, column=0, sticky="ew", padx=(0, 6), pady=(6, 0))
+        ttk.Button(dimf, text="Height +", command=lambda:self.change_height(+1), style="Tool.TButton").grid(row=1, column=1, sticky="ew", pady=(6, 0))
 
         shiftf = ttk.LabelFrame(tools, text="Shift Pixels", style="App.TLabelframe", padding=(8, 8))
         shiftf.grid(row=3, column=0, sticky="ew", pady=(0, 8))
         shiftf.columnconfigure(0, weight=1)
         shiftf.columnconfigure(1, weight=1)
-        ttk.Button(shiftf, text="Shift Left", command=lambda:self.shift_pixels(-1), style="Tool.TButton").grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        ttk.Button(shiftf, text="Shift Right", command=lambda:self.shift_pixels(+1), style="Tool.TButton").grid(row=0, column=1, sticky="ew")
+        ttk.Button(shiftf, text="Shift Left", command=lambda:self.shift_pixels(dx=-1), style="Tool.TButton").grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ttk.Button(shiftf, text="Shift Right", command=lambda:self.shift_pixels(dx=+1), style="Tool.TButton").grid(row=0, column=1, sticky="ew")
+        ttk.Button(shiftf, text="Shift Up", command=lambda:self.shift_pixels(dy=-1), style="Tool.TButton").grid(row=1, column=0, sticky="ew", padx=(0, 6), pady=(6, 0))
+        ttk.Button(shiftf, text="Shift Down", command=lambda:self.shift_pixels(dy=+1), style="Tool.TButton").grid(row=1, column=1, sticky="ew", pady=(6, 0))
 
         monof = ttk.LabelFrame(tools, text="Monospace Selected", style="App.TLabelframe", padding=(8, 8))
         monof.grid(row=4, column=0, sticky="ew")
@@ -1172,23 +1176,47 @@ class FontGUI:
         g["bitmap"] = newbmp
         self.show_glyph(self.current_cp)
 
-    # -------------------- shift pixels inside glyph box --------------------
-    def shift_pixels(self, direction):
+    # -------------------- height change (adds/removes blank rows at bottom) --------------------
+    def change_height(self, d):
         if not self.font or self.current_cp is None: return
         g = self.font.glyphs[self.current_cp]
-        w = g["width"]
-        newbmp = []
-        if direction < 0:
-            mask = (1 << (w-1)) - 1
-            for row in g["bitmap"]:
+        oldh = int(g["height"])
+        newh = max(1, oldh + d)
+        if newh == oldh: return
+        if newh > oldh:
+            newbmp = list(g["bitmap"]) + ([0] * (newh - oldh))
+        else:
+            newbmp = list(g["bitmap"][:newh])
+        g["height"] = newh
+        g["bitmap"] = newbmp
+        self.show_glyph(self.current_cp)
+
+    # -------------------- shift pixels inside glyph box --------------------
+    def shift_pixels(self, dx=0, dy=0):
+        if not self.font or self.current_cp is None: return
+        if dx == 0 and dy == 0: return
+        g = self.font.glyphs[self.current_cp]
+        w = int(g["width"])
+        h = int(g["height"])
+        newbmp = [int(row) for row in g["bitmap"]]
+
+        if dx < 0:
+            mask = (1 << (w - 1)) - 1 if w > 1 else 0
+            shifted = []
+            for row in newbmp:
                 newrow = (row & mask) << 1
                 newrow &= (1 << w) - 1
-                newbmp.append(newrow)
-        else:
-            for row in g["bitmap"]:
-                newrow = row >> 1
-                newbmp.append(newrow)
-        g["bitmap"] = newbmp
+                shifted.append(newrow)
+            newbmp = shifted
+        elif dx > 0:
+            newbmp = [row >> 1 for row in newbmp]
+
+        if dy < 0:
+            newbmp = newbmp[1:] + [0]
+        elif dy > 0:
+            newbmp = [0] + newbmp[:-1]
+
+        g["bitmap"] = newbmp[:h]
         self.show_glyph(self.current_cp)
 
     def monospace_selected(self):
