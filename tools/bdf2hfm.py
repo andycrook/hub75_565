@@ -529,8 +529,8 @@ class FontGUI:
     def __init__(self, root):
         self.root = root
         root.title("BDF/HFM Editor + Exporter")
-        root.geometry("1380x750")
-        root.minsize(1080, 720)
+        root.geometry("1360x720")
+        root.minsize(1080, 680)
         root.configure(bg="#eef3f8")
 
         self.font = None
@@ -539,16 +539,25 @@ class FontGUI:
         self.start_var = tk.IntVar(value=32)
         self.end_var = tk.IntVar(value=127)
         self.font_summary_var = tk.StringVar(value="No font loaded")
+        self.loaded_font_var = tk.StringVar(value="Loaded font: none")
         self.preview_title_var = tk.StringVar(value="Glyph Preview")
         self.preview_meta_var = tk.StringVar(value="Load a font to inspect and edit glyphs")
         self.zoom_var = tk.StringVar(value="18x")
         self.status_var = tk.StringVar(value="Load a BDF or HFM font to begin.")
         self.sample_text_var = tk.StringVar(value="12:34  0123456789")
+        self.sample_spacing_var = tk.StringVar(value="1")
+        self.batch_use_export_range_var = tk.BooleanVar(value=True)
+        self.batch_auto_adjust_widths_var = tk.BooleanVar(value=False)
+        self.xoff_var = tk.IntVar(value=0)
+        self.yoff_var = tk.IntVar(value=0)
+        self.ascent_var = tk.IntVar(value=0)
+        self.descent_var = tk.IntVar(value=0)
         self.mono_align_var = tk.StringVar(value="center")
 
         self._configure_styles()
         self._build_layout()
         self.sample_text_var.trace_add("write", lambda *_args: self.render_sample_strip())
+        self.sample_spacing_var.trace_add("write", lambda *_args: self.render_sample_strip())
         self._update_zoom_label()
         self.render_sample_strip()
 
@@ -566,13 +575,16 @@ class FontGUI:
         style.configure("PanelMeta.TLabel", background="#ffffff", foreground="#64748b", font=("Segoe UI", 10))
         style.configure("Status.TLabel", background="#ffffff", foreground="#334155", font=("Segoe UI", 10))
         style.configure("Hint.TLabel", background="#ffffff", foreground="#64748b", font=("Segoe UI", 9))
+        style.configure("App.TCheckbutton", background="#eef3f8", foreground="#334155", font=("Segoe UI", 9))
         style.configure("App.TLabelframe", background="#eef3f8", foreground="#0f172a")
         style.configure("App.TLabelframe.Label", background="#eef3f8", foreground="#0f172a", font=("Segoe UI Semibold", 11))
         style.configure("Panel.TLabelframe", background="#ffffff", foreground="#0f172a")
         style.configure("Panel.TLabelframe.Label", background="#ffffff", foreground="#0f172a", font=("Segoe UI Semibold", 11))
-        style.configure("Tool.TButton", font=("Segoe UI", 9), padding=(8, 6))
-        style.configure("Accent.TButton", font=("Segoe UI Semibold", 9), padding=(10, 7), foreground="#ffffff")
+        style.configure("Tool.TButton", font=("Segoe UI", 9), padding=(7, 4))
+        style.configure("Accent.TButton", font=("Segoe UI Semibold", 9), padding=(8, 5), foreground="#ffffff")
         style.map("Accent.TButton", background=[("active", "#1d4ed8"), ("!disabled", "#2563eb")])
+        style.configure("Danger.TButton", font=("Segoe UI Semibold", 9), padding=(8, 5), foreground="#ffffff")
+        style.map("Danger.TButton", background=[("active", "#b91c1c"), ("!disabled", "#dc2626")])
         style.configure("Light.TEntry", fieldbackground="#ffffff", foreground="#0f172a")
         style.configure("Light.TCombobox", fieldbackground="#ffffff", foreground="#0f172a")
 
@@ -580,7 +592,7 @@ class FontGUI:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(2, weight=1)
 
-        header = ttk.Frame(self.root, style="App.TFrame", padding=(16, 12, 16, 6))
+        header = ttk.Frame(self.root, style="App.TFrame", padding=(14, 8, 14, 4))
         header.grid(row=0, column=0, sticky="ew")
         header.columnconfigure(0, weight=1)
         header.columnconfigure(1, weight=0)
@@ -590,23 +602,23 @@ class FontGUI:
             header,
             text="Browse glyphs, inspect the bitmap larger, preview live text, and edit directly on the centered canvas.",
             style="Subtitle.TLabel",
-        ).grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ).grid(row=1, column=0, sticky="w", pady=(2, 0))
         support = tk.Label(
             header,
             text=BUY_ME_A_COFFEE_LABEL,
             fg="#2563eb",
             bg="#eef3f8",
             cursor="hand2",
-            font=("Segoe UI", 20, "underline"),
+            font=("Segoe UI", 17, "underline"),
         )
         support.grid(row=0, column=1, rowspan=2, sticky="e")
         support.bind("<Button-1>", lambda _event: self.open_support_link())
 
-        toolbar = ttk.Frame(self.root, style="App.TFrame", padding=(16, 0, 16, 8))
+        toolbar = ttk.Frame(self.root, style="App.TFrame", padding=(14, 0, 14, 6))
         toolbar.grid(row=1, column=0, sticky="ew")
         toolbar.columnconfigure(0, weight=1)
 
-        files = ttk.LabelFrame(toolbar, text="Font Files", style="App.TLabelframe", padding=(10, 8))
+        files = ttk.LabelFrame(toolbar, text="Font Files", style="App.TLabelframe", padding=(8, 6))
         files.grid(row=0, column=0, sticky="w", padx=(0, 12))
         ttk.Button(files, text="Load BDF", command=self.load_bdf, style="Accent.TButton").grid(row=0, column=0, padx=(0, 8))
         ttk.Button(files, text="Load HFM", command=self.load_hfm, style="Tool.TButton").grid(row=0, column=1, padx=(0, 8))
@@ -614,23 +626,36 @@ class FontGUI:
         ttk.Button(files, text="Save BDF", command=self.export_bdf, style="Tool.TButton").grid(row=0, column=3, padx=(8, 0))
         ttk.Button(files, text="Batch BDF -> HFM", command=self.batch_convert_bdf_folder, style="Tool.TButton").grid(row=0, column=4, padx=(8, 0))
         ttk.Button(files, text="About HFM", command=self.show_hfm_about, style="Tool.TButton").grid(row=0, column=5, padx=(8, 0))
+        ttk.Checkbutton(
+            files,
+            text="Batch auto adjust widths",
+            variable=self.batch_auto_adjust_widths_var,
+            style="App.TCheckbutton",
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        ttk.Checkbutton(
+            files,
+            text="Batch uses export range",
+            variable=self.batch_use_export_range_var,
+            style="App.TCheckbutton",
+        ).grid(row=1, column=4, columnspan=2, sticky="w", pady=(6, 0))
+        ttk.Label(files, textvariable=self.loaded_font_var, style="App.TLabel").grid(row=2, column=0, columnspan=6, sticky="w", pady=(6, 0))
 
-        export = ttk.LabelFrame(toolbar, text="Export Range", style="App.TLabelframe", padding=(10, 8))
+        export = ttk.LabelFrame(toolbar, text="Export Range", style="App.TLabelframe", padding=(8, 6))
         export.grid(row=0, column=1, sticky="e")
         ttk.Label(export, text="Start", style="App.TLabel").grid(row=0, column=0, padx=(0, 6))
         ttk.Entry(export, width=8, textvariable=self.start_var, style="Light.TEntry").grid(row=0, column=1, padx=(0, 10))
         ttk.Label(export, text="End", style="App.TLabel").grid(row=0, column=2, padx=(0, 6))
         ttk.Entry(export, width=8, textvariable=self.end_var, style="Light.TEntry").grid(row=0, column=3)
 
-        main = ttk.Frame(self.root, style="App.TFrame", padding=(16, 0, 16, 10))
+        main = ttk.Frame(self.root, style="App.TFrame", padding=(14, 0, 14, 8))
         main.grid(row=2, column=0, sticky="nsew")
         main.columnconfigure(1, weight=1)
         main.rowconfigure(0, weight=1)
 
-        self.sidebar = ttk.LabelFrame(main, text="Glyph List", style="App.TLabelframe", padding=(10, 10))
+        self.sidebar = ttk.LabelFrame(main, text="Glyph List", style="App.TLabelframe", padding=(8, 8))
         self.sidebar.grid(row=0, column=0, sticky="ns", padx=(0, 14))
         sidebar = self.sidebar
-        ttk.Label(sidebar, textvariable=self.font_summary_var, style="App.TLabel", justify="left").pack(anchor="w", pady=(0, 10))
+        ttk.Label(sidebar, textvariable=self.font_summary_var, style="App.TLabel", justify="left").pack(anchor="w", pady=(0, 8))
 
         list_wrap = ttk.Frame(sidebar, style="App.TFrame")
         list_wrap.pack(fill="both", expand=True)
@@ -653,20 +678,21 @@ class FontGUI:
         )
         self.listbox.pack(side=tk.LEFT, fill="both", expand=True)
         self.listbox.bind("<<ListboxSelect>>", self.on_list_select)
+        self.listbox.bind("<Delete>", self.delete_selected_glyphs)
         scrollbar = ttk.Scrollbar(list_wrap, orient="vertical", command=self.listbox.yview)
         scrollbar.pack(side=tk.LEFT, fill="y", padx=(8, 0))
         self.listbox.configure(yscrollcommand=scrollbar.set)
 
-        preview = ttk.Frame(main, style="Panel.TFrame", padding=(14, 12))
+        preview = ttk.Frame(main, style="Panel.TFrame", padding=(12, 10))
         preview.grid(row=0, column=1, sticky="nsew", padx=(0, 14))
         preview.columnconfigure(0, weight=1)
         preview.rowconfigure(1, weight=1)
 
         preview_header = ttk.Frame(preview, style="Panel.TFrame")
-        preview_header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        preview_header.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         preview_header.columnconfigure(0, weight=1)
         ttk.Label(preview_header, textvariable=self.preview_title_var, style="PanelTitle.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(preview_header, textvariable=self.preview_meta_var, style="PanelMeta.TLabel").grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ttk.Label(preview_header, textvariable=self.preview_meta_var, style="PanelMeta.TLabel").grid(row=1, column=0, sticky="w", pady=(2, 0))
 
         canvas_shell = ttk.Frame(preview, style="Panel.TFrame")
         canvas_shell.grid(row=1, column=0, sticky="nsew")
@@ -679,57 +705,73 @@ class FontGUI:
         self.canvas.bind("<Configure>", self.on_canvas_resize)
         self.canvas.bind("<MouseWheel>", self.on_canvas_mousewheel)
 
-        sample_group = ttk.LabelFrame(preview, text="Live Sample", style="Panel.TLabelframe", padding=(10, 8))
-        sample_group.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        sample_group = ttk.LabelFrame(preview, text="Live Sample", style="Panel.TLabelframe", padding=(8, 6))
+        sample_group.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         sample_group.columnconfigure(1, weight=1)
         ttk.Label(sample_group, text="Text", style="PanelMeta.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
         ttk.Entry(sample_group, textvariable=self.sample_text_var, style="Light.TEntry").grid(row=0, column=1, sticky="ew")
+        ttk.Label(sample_group, text="Letter spacing", style="PanelMeta.TLabel").grid(row=0, column=2, sticky="w", padx=(12, 8))
+        ttk.Spinbox(sample_group, from_=0, to=16, width=6, textvariable=self.sample_spacing_var).grid(row=0, column=3, sticky="w")
         self.sample_canvas = tk.Canvas(
             sample_group,
-            height=92,
+            height=80,
             bg="#ffffff",
             highlightthickness=1,
             highlightbackground="#d7dee8",
             bd=0,
         )
-        self.sample_canvas.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        self.sample_canvas.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(8, 0))
         self.sample_canvas.bind("<Configure>", self.on_sample_resize)
+        ttk.Label(
+            sample_group,
+            text="Preview spacing matches draw_text(letter_spacing=...).",
+            style="Hint.TLabel",
+            justify="left",
+        ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(6, 0))
 
         ttk.Label(
             preview,
             text="Click pixels to toggle them. Use the mouse wheel or the zoom buttons to scale the view.",
             style="Hint.TLabel",
-        ).grid(row=3, column=0, sticky="w", pady=(8, 0))
+        ).grid(row=3, column=0, sticky="w", pady=(6, 0))
 
-        tools = ttk.LabelFrame(main, text="Tools", style="App.TLabelframe", padding=(10, 10))
+        tools = ttk.LabelFrame(main, text="Tools", style="App.TLabelframe", padding=(8, 8))
         tools.grid(row=0, column=2, sticky="ns")
         tools.columnconfigure(0, weight=1)
+        tools.columnconfigure(1, weight=1)
 
-        nav = ttk.LabelFrame(tools, text="Navigate", style="App.TLabelframe", padding=(8, 8))
-        nav.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        nav = ttk.LabelFrame(tools, text="Navigate", style="App.TLabelframe", padding=(6, 6))
+        nav.grid(row=0, column=0, sticky="new", padx=(0, 6), pady=(0, 6))
         nav.columnconfigure(0, weight=1)
         nav.columnconfigure(1, weight=1)
         ttk.Button(nav, text="Prev", command=self.prev_glyph, style="Tool.TButton").grid(row=0, column=0, sticky="ew", padx=(0, 6))
         ttk.Button(nav, text="Next", command=self.next_glyph, style="Tool.TButton").grid(row=0, column=1, sticky="ew")
 
-        zoomf = ttk.LabelFrame(tools, text="Zoom", style="App.TLabelframe", padding=(8, 8))
-        zoomf.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        zoomf = ttk.LabelFrame(tools, text="Zoom", style="App.TLabelframe", padding=(6, 6))
+        zoomf.grid(row=0, column=1, sticky="new", pady=(0, 6))
         zoomf.columnconfigure(1, weight=1)
         ttk.Button(zoomf, text="-", command=lambda:self.change_zoom(-1), style="Tool.TButton").grid(row=0, column=0, sticky="ew", padx=(0, 8))
         ttk.Label(zoomf, textvariable=self.zoom_var, style="App.TLabel", anchor="center").grid(row=0, column=1, sticky="ew")
         ttk.Button(zoomf, text="+", command=lambda:self.change_zoom(+1), style="Tool.TButton").grid(row=0, column=2, sticky="ew", padx=(8, 0))
 
-        dimf = ttk.LabelFrame(tools, text="Glyph Dimensions", style="App.TLabelframe", padding=(8, 8))
-        dimf.grid(row=2, column=0, sticky="ew", pady=(0, 8))
+        dimf = ttk.LabelFrame(tools, text="Glyph Dimensions", style="App.TLabelframe", padding=(6, 6))
+        dimf.grid(row=1, column=0, sticky="new", padx=(0, 6), pady=(0, 6))
         dimf.columnconfigure(0, weight=1)
         dimf.columnconfigure(1, weight=1)
         ttk.Button(dimf, text="Width -", command=lambda:self.change_width(-1), style="Tool.TButton").grid(row=0, column=0, sticky="ew", padx=(0, 6))
         ttk.Button(dimf, text="Width +", command=lambda:self.change_width(+1), style="Tool.TButton").grid(row=0, column=1, sticky="ew")
         ttk.Button(dimf, text="Height -", command=lambda:self.change_height(-1), style="Tool.TButton").grid(row=1, column=0, sticky="ew", padx=(0, 6), pady=(6, 0))
         ttk.Button(dimf, text="Height +", command=lambda:self.change_height(+1), style="Tool.TButton").grid(row=1, column=1, sticky="ew", pady=(6, 0))
+        ttk.Button(dimf, text="Auto Adjust Widths", command=self.auto_adjust_widths, style="Tool.TButton").grid(
+            row=2,
+            column=0,
+            columnspan=2,
+            sticky="ew",
+            pady=(6, 0),
+        )
 
-        shiftf = ttk.LabelFrame(tools, text="Shift Pixels", style="App.TLabelframe", padding=(8, 8))
-        shiftf.grid(row=3, column=0, sticky="ew", pady=(0, 8))
+        shiftf = ttk.LabelFrame(tools, text="Shift Pixels", style="App.TLabelframe", padding=(6, 6))
+        shiftf.grid(row=1, column=1, sticky="new", pady=(0, 6))
         shiftf.columnconfigure(0, weight=1)
         shiftf.columnconfigure(1, weight=1)
         ttk.Button(shiftf, text="Shift Left", command=lambda:self.shift_pixels(dx=-1), style="Tool.TButton").grid(row=0, column=0, sticky="ew", padx=(0, 6))
@@ -737,8 +779,50 @@ class FontGUI:
         ttk.Button(shiftf, text="Shift Up", command=lambda:self.shift_pixels(dy=-1), style="Tool.TButton").grid(row=1, column=0, sticky="ew", padx=(0, 6), pady=(6, 0))
         ttk.Button(shiftf, text="Shift Down", command=lambda:self.shift_pixels(dy=+1), style="Tool.TButton").grid(row=1, column=1, sticky="ew", pady=(6, 0))
 
-        monof = ttk.LabelFrame(tools, text="Monospace Selected", style="App.TLabelframe", padding=(8, 8))
-        monof.grid(row=4, column=0, sticky="ew")
+        offsetf = ttk.LabelFrame(tools, text="Glyph Offsets", style="App.TLabelframe", padding=(6, 6))
+        offsetf.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        offsetf.columnconfigure(1, weight=1)
+        offsetf.columnconfigure(3, weight=1)
+        ttk.Label(offsetf, text="xoff", style="App.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        ttk.Spinbox(offsetf, from_=-128, to=127, width=6, textvariable=self.xoff_var).grid(row=0, column=1, sticky="ew")
+        ttk.Label(offsetf, text="yoff", style="App.TLabel").grid(row=0, column=2, sticky="w", padx=(12, 8))
+        ttk.Spinbox(offsetf, from_=-128, to=127, width=6, textvariable=self.yoff_var).grid(row=0, column=3, sticky="ew")
+        ttk.Button(offsetf, text="X -", command=lambda:self.nudge_selected_offsets(dx=-1), style="Tool.TButton").grid(
+            row=1,
+            column=0,
+            sticky="ew",
+            padx=(0, 6),
+            pady=(8, 0),
+        )
+        ttk.Button(offsetf, text="X +", command=lambda:self.nudge_selected_offsets(dx=+1), style="Tool.TButton").grid(
+            row=1,
+            column=1,
+            sticky="ew",
+            pady=(8, 0),
+        )
+        ttk.Button(offsetf, text="Y -", command=lambda:self.nudge_selected_offsets(dy=-1), style="Tool.TButton").grid(
+            row=1,
+            column=2,
+            sticky="ew",
+            padx=(12, 6),
+            pady=(8, 0),
+        )
+        ttk.Button(offsetf, text="Y +", command=lambda:self.nudge_selected_offsets(dy=+1), style="Tool.TButton").grid(
+            row=1,
+            column=3,
+            sticky="ew",
+            pady=(8, 0),
+        )
+        ttk.Button(offsetf, text="Apply To Selection", command=self.apply_selected_offsets, style="Accent.TButton").grid(
+            row=2,
+            column=0,
+            columnspan=4,
+            sticky="ew",
+            pady=(8, 0),
+        )
+
+        monof = ttk.LabelFrame(tools, text="Monospace Selected", style="App.TLabelframe", padding=(6, 6))
+        monof.grid(row=3, column=0, sticky="new", padx=(0, 6), pady=(0, 6))
         monof.columnconfigure(1, weight=1)
         ttk.Label(monof, text="Justify", style="App.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
         ttk.Combobox(
@@ -754,22 +838,93 @@ class FontGUI:
             column=0,
             columnspan=2,
             sticky="ew",
-            pady=(10, 0),
+            pady=(8, 0),
         )
-        ttk.Label(
-            monof,
-            text="Select multiple glyphs in the list, then widen them to the widest glyph using the chosen alignment.",
-            style="App.TLabel",
-            justify="left",
-        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(10, 0))
 
-        status = ttk.Frame(self.root, style="Panel.TFrame", padding=(16, 8))
+        fontf = ttk.LabelFrame(tools, text="Font Metrics", style="App.TLabelframe", padding=(6, 6))
+        fontf.grid(row=3, column=1, sticky="new", pady=(0, 6))
+        fontf.columnconfigure(1, weight=1)
+        fontf.columnconfigure(3, weight=1)
+        ttk.Label(fontf, text="Ascent", style="App.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        ttk.Spinbox(fontf, from_=0, to=255, width=6, textvariable=self.ascent_var).grid(row=0, column=1, sticky="ew")
+        ttk.Label(fontf, text="Descent", style="App.TLabel").grid(row=0, column=2, sticky="w", padx=(12, 8))
+        ttk.Spinbox(fontf, from_=0, to=255, width=6, textvariable=self.descent_var).grid(row=0, column=3, sticky="ew")
+        ttk.Button(fontf, text="Apply Font Metrics", command=self.apply_font_metrics, style="Accent.TButton").grid(
+            row=1,
+            column=0,
+            columnspan=4,
+            sticky="ew",
+            pady=(8, 0),
+        )
+
+        deletef = ttk.LabelFrame(tools, text="Delete", style="App.TLabelframe", padding=(6, 6))
+        deletef.grid(row=4, column=0, columnspan=2, sticky="ew")
+        deletef.columnconfigure(0, weight=1)
+        ttk.Button(deletef, text="Delete Selected Glyphs", command=self.delete_selected_glyphs, style="Danger.TButton").grid(
+            row=0,
+            column=0,
+            sticky="ew",
+        )
+
+        status = ttk.Frame(self.root, style="Panel.TFrame", padding=(14, 6))
         status.grid(row=3, column=0, sticky="ew")
         status.columnconfigure(0, weight=1)
         ttk.Label(status, textvariable=self.status_var, style="Status.TLabel").grid(row=0, column=0, sticky="w")
 
     def _set_status(self, text):
         self.status_var.set(text)
+
+    def _sample_letter_spacing(self):
+        try:
+            return max(0, int(self.sample_spacing_var.get()))
+        except (TypeError, ValueError):
+            return 1
+
+    def _read_int_var(self, variable, field_name, minimum=None, maximum=None):
+        try:
+            value = int(variable.get())
+        except (tk.TclError, ValueError):
+            messagebox.showerror("Invalid Value", f"{field_name} must be an integer.")
+            return None
+
+        if minimum is not None and value < minimum:
+            messagebox.showerror("Invalid Value", f"{field_name} must be between {minimum} and {maximum}.")
+            return None
+        if maximum is not None and value > maximum:
+            messagebox.showerror("Invalid Value", f"{field_name} must be between {minimum} and {maximum}.")
+            return None
+        return value
+
+    def _sync_metric_controls(self):
+        font = self.font
+        if font is None:
+            self.xoff_var.set(0)
+            self.yoff_var.set(0)
+            self.ascent_var.set(0)
+            self.descent_var.set(0)
+            return
+
+        self.ascent_var.set(int(font.ascent))
+        self.descent_var.set(int(font.descent))
+
+        glyph = font.glyphs.get(self.current_cp) if self.current_cp is not None else None
+        if glyph is None:
+            self.xoff_var.set(0)
+            self.yoff_var.set(0)
+            return
+
+        self.xoff_var.set(int(glyph.get("xoff", 0)))
+        self.yoff_var.set(int(glyph.get("yoff", 0)))
+
+    def _update_loaded_font_label(self):
+        font = self.font
+        if not font:
+            self.loaded_font_var.set("Loaded font: none")
+            return
+
+        source_name = os.path.basename(font.source_path) if getattr(font, "source_path", None) else getattr(font, "font_name", "font")
+        source_format = font.source_format.upper() if font.source_format else "FONT"
+        self.loaded_font_var.set(f"Loaded font: {source_name} ({source_format})")
 
     def open_support_link(self):
         try:
@@ -829,6 +984,26 @@ class FontGUI:
         if self.font is not None and self.font.source_path:
             initial_dir = os.path.dirname(self.font.source_path)
 
+        use_export_range = bool(self.batch_use_export_range_var.get())
+        auto_adjust_widths = bool(self.batch_auto_adjust_widths_var.get())
+        if use_export_range:
+            try:
+                start_cp = int(self.start_var.get())
+                end_cp = int(self.end_var.get())
+            except (tk.TclError, ValueError):
+                messagebox.showerror("Batch Convert", "Export range must contain whole numbers before batch convert can use it.")
+                return
+
+            if start_cp < 0 or end_cp > 0xFFFF or start_cp > end_cp:
+                messagebox.showerror("Batch Convert", "Export range must be within 0..65535 and Start must be less than or equal to End.")
+                return
+        else:
+            start_cp = 0
+            end_cp = 0xFFFF
+
+        range_desc = f"glyphs {start_cp} to {end_cp}" if use_export_range else "the full glyph range"
+        adjust_desc = " with auto width adjustment" if auto_adjust_widths else ""
+
         folder = filedialog.askdirectory(initialdir=initial_dir or os.getcwd())
         if not folder:
             return
@@ -848,7 +1023,7 @@ class FontGUI:
 
         should_convert = messagebox.askokcancel(
             "Batch Convert BDF -> HFM",
-            f"Found {count} BDF font(s) under:\n{folder}\n\nPress OK to create matching .hfm files beside each .bdf source.",
+            f"Found {count} BDF font(s) under:\n{folder}\n\nBatch convert will export {range_desc}{adjust_desc}.\n\nPress OK to create matching .hfm files beside each .bdf source.",
             default=messagebox.OK,
         )
         if not should_convert:
@@ -860,8 +1035,11 @@ class FontGUI:
         for bdf_path in bdf_paths:
             try:
                 font = BDFFont.load(bdf_path)
+                if auto_adjust_widths:
+                    for glyph in font.glyphs.values():
+                        self._trim_glyph_horizontal_space(glyph)
                 out_path = os.path.splitext(bdf_path)[0] + ".hfm"
-                write_hfm(out_path, font, 0, 0xFFFF)
+                write_hfm(out_path, font, start_cp, end_cp)
                 converted += 1
             except Exception as exc:
                 failures.append((bdf_path, str(exc)))
@@ -874,28 +1052,33 @@ class FontGUI:
                 details += f"\n... and {len(failures) - 10} more"
             messagebox.showwarning(
                 "Batch Convert Completed With Errors",
-                f"Converted {converted} of {count} BDF font(s).\n\nFailures:\n{details}",
+                f"Converted {converted} of {count} BDF font(s) using {range_desc}{adjust_desc}.\n\nFailures:\n{details}",
             )
-            self._set_status(f"Batch converted {converted}/{count} BDF fonts to HFM")
+            self._set_status(f"Batch converted {converted}/{count} BDF fonts to HFM using {range_desc}{adjust_desc}")
             return
 
         messagebox.showinfo(
             "Batch Convert Complete",
-            f"Converted {converted} BDF font(s) to HFM in place.",
+            f"Converted {converted} BDF font(s) to HFM in place using {range_desc}{adjust_desc}.",
         )
-        self._set_status(f"Batch converted {converted} BDF fonts to HFM")
+        self._set_status(f"Batch converted {converted} BDF fonts to HFM using {range_desc}{adjust_desc}")
 
     def _update_font_summary(self):
         if not self.font:
             self.font_summary_var.set("No font loaded")
             self.sidebar.configure(text="Glyph List")
+            self._update_loaded_font_label()
+            self._sync_metric_controls()
             return
         glyph_count = len(self.font.glyphs)
         self.sidebar.configure(text=f"Glyph List ({glyph_count})")
         source = self.font.source_format.upper() if self.font.source_format else "FONT"
+        source_name = os.path.basename(self.font.source_path) if self.font.source_path else self.font.font_name
         self.font_summary_var.set(
-            f"{source} source\nAscent: {self.font.ascent}  Descent: {self.font.descent}\nCtrl-click to multi-select glyphs"
+            f"{source_name}\n{source} source   Ascent: {self.font.ascent}  Descent: {self.font.descent}\nCtrl-click to multi-select glyphs"
         )
+        self._update_loaded_font_label()
+        self._sync_metric_controls()
 
     def _update_zoom_label(self):
         self.zoom_var.set(f"{self.zoom}x")
@@ -913,6 +1096,30 @@ class FontGUI:
             selected.append(self.current_cp)
         return selected
 
+    def _apply_to_selected_glyphs(self, action):
+        font = self.font
+        if font is None:
+            return 0, []
+
+        selected = [cp for cp in self._get_selected_codepoints() if cp in font.glyphs]
+        changed = 0
+        for cp in selected:
+            glyph = font.glyphs.get(cp)
+            if glyph is None:
+                continue
+            if action(cp, glyph):
+                changed += 1
+        return changed, selected
+
+    def _refresh_after_bulk_edit(self, selected, status_text):
+        if not selected:
+            return
+        focus_cp = self.current_cp if self.current_cp in selected else selected[0]
+        if self.font is not None and focus_cp not in self.font.glyphs:
+            focus_cp = selected[0]
+        self.show_glyph(focus_cp)
+        self._set_status(status_text)
+
     def render_sample_strip(self):
         canvas = getattr(self, "sample_canvas", None)
         if canvas is None:
@@ -926,6 +1133,7 @@ class FontGUI:
 
         font = self.font
         sample_text = self.sample_text_var.get()
+        letter_spacing = self._sample_letter_spacing()
         if font is None or not font.glyphs:
             canvas.create_text(
                 canvas_w // 2,
@@ -946,7 +1154,7 @@ class FontGUI:
             )
             return
 
-        fallback_advance = max(3, max((int(g["width"]) for g in font.glyphs.values()), default=6) // 2)
+        fallback_advance = max(3, max((int(g["width"]) for g in font.glyphs.values()), default=6) // 2) + letter_spacing
         glyph_runs = []
         max_top = max(1, int(font.ascent))
         max_bottom = max(1, int(font.descent))
@@ -961,7 +1169,7 @@ class FontGUI:
             height = int(glyph["height"])
             max_top = max(max_top, height + yoff)
             max_bottom = max(max_bottom, -yoff)
-            glyph_runs.append((glyph, int(glyph["width"]) + 1))
+            glyph_runs.append((glyph, int(glyph["width"]) + letter_spacing))
 
         raw_width = max(1, sum(advance for _glyph, advance in glyph_runs))
         raw_height = max(1, max_top + max_bottom)
@@ -1040,24 +1248,35 @@ class FontGUI:
         self._set_status(f"Loaded HFM font: {os.path.basename(p)} ({len(self.font.glyphs)} glyphs)")
 
     # -------------------- populate charset listbox --------------------
-    def populate_listbox(self):
+    def populate_listbox(self, selected_cps=None, active_cp=None):
         font = self.font
         if font is None:
             return
         self.listbox.delete(0, tk.END)
         self._update_font_summary()
-        for cp in sorted(font.glyphs.keys()):
+        cps = sorted(font.glyphs.keys())
+        for cp in cps:
             ch = chr(cp) if cp >= 32 else '?'
             self.listbox.insert(tk.END,f"{cp:3d} 0x{cp:04X} '{ch}'")
-        if self.listbox.size() > 0:
-            self.listbox.select_set(0)
-            self.listbox.activate(0)
-            self.listbox.see(0)
-            self.on_list_select(None)
+        if cps:
+            selected = [cp for cp in (selected_cps or []) if cp in font.glyphs]
+            focus_cp = active_cp if active_cp in font.glyphs else None
+            if focus_cp is None:
+                focus_cp = selected[0] if selected else cps[0]
+
+            for cp in selected or [focus_cp]:
+                self.listbox.selection_set(cps.index(cp))
+
+            focus_idx = cps.index(focus_cp)
+            self.listbox.activate(focus_idx)
+            self.listbox.see(focus_idx)
+            self.show_glyph(focus_cp)
         else:
             self.current_cp = None
+            self.canvas.delete("all")
             self.preview_title_var.set("Glyph Preview")
             self.preview_meta_var.set("Load a font to inspect and edit glyphs")
+            self._sync_metric_controls()
             self.render_sample_strip()
 
     # -------------------- charset select --------------------
@@ -1080,6 +1299,7 @@ class FontGUI:
         g = font.glyphs.get(cp)
         self.canvas.delete("all")
         if not g: return
+        self._sync_metric_controls()
         w,h = g["width"], g["height"]
         bmp = g["bitmap"]
         z = self.zoom
@@ -1157,67 +1377,199 @@ class FontGUI:
     # -------------------- width change (adds/removes blank columns on right) --------------------
     def change_width(self,d):
         if not self.font or self.current_cp is None: return
-        g = self.font.glyphs[self.current_cp]
-        oldw = g["width"]
-        neww = max(1, oldw + d)
-        if neww == oldw: return
-        newbmp = []
-        if neww > oldw:
-            shift = neww - oldw
-            for row in g["bitmap"]:
-                newrow = row << shift
-                newbmp.append(newrow)
-        else:
-            shift = oldw - neww
-            for row in g["bitmap"]:
-                newrow = row >> shift
-                newbmp.append(newrow)
-        g["width"] = neww
-        g["bitmap"] = newbmp
-        self.show_glyph(self.current_cp)
+
+        def apply_width(_cp, glyph):
+            oldw = int(glyph["width"])
+            neww = max(1, oldw + d)
+            if neww == oldw:
+                return False
+
+            newbmp = []
+            if neww > oldw:
+                shift = neww - oldw
+                for row in glyph["bitmap"]:
+                    newbmp.append(int(row) << shift)
+            else:
+                shift = oldw - neww
+                for row in glyph["bitmap"]:
+                    newbmp.append(int(row) >> shift)
+
+            glyph["width"] = neww
+            glyph["bitmap"] = newbmp
+            return True
+
+        changed, selected = self._apply_to_selected_glyphs(apply_width)
+        if changed == 0:
+            return
+        self._refresh_after_bulk_edit(selected, f"Adjusted width on {changed} glyph{'s' if changed != 1 else ''}")
 
     # -------------------- height change (adds/removes blank rows at bottom) --------------------
     def change_height(self, d):
         if not self.font or self.current_cp is None: return
-        g = self.font.glyphs[self.current_cp]
-        oldh = int(g["height"])
-        newh = max(1, oldh + d)
-        if newh == oldh: return
-        if newh > oldh:
-            newbmp = list(g["bitmap"]) + ([0] * (newh - oldh))
-        else:
-            newbmp = list(g["bitmap"][:newh])
-        g["height"] = newh
-        g["bitmap"] = newbmp
-        self.show_glyph(self.current_cp)
+
+        def apply_height(_cp, glyph):
+            oldh = int(glyph["height"])
+            newh = max(1, oldh + d)
+            if newh == oldh:
+                return False
+
+            if newh > oldh:
+                newbmp = list(glyph["bitmap"]) + ([0] * (newh - oldh))
+            else:
+                newbmp = list(glyph["bitmap"][:newh])
+
+            glyph["height"] = newh
+            glyph["bitmap"] = newbmp
+            return True
+
+        changed, selected = self._apply_to_selected_glyphs(apply_height)
+        if changed == 0:
+            return
+        self._refresh_after_bulk_edit(selected, f"Adjusted height on {changed} glyph{'s' if changed != 1 else ''}")
+
+    def _trailing_blank_columns(self, row, width):
+        count = 0
+        while count < width and ((row >> count) & 1) == 0:
+            count += 1
+        return count
+
+    def _trim_glyph_horizontal_space(self, glyph):
+        width = int(glyph["width"])
+        if width <= 0:
+            return False
+
+        mask = (1 << width) - 1
+        rows = [int(row) & mask for row in glyph["bitmap"]]
+        ink_rows = [row for row in rows if row]
+        if not ink_rows:
+            return False
+
+        left_trim = min(width - row.bit_length() for row in ink_rows)
+        right_trim = min(self._trailing_blank_columns(row, width) for row in ink_rows)
+        if left_trim == 0 and right_trim == 0:
+            return False
+
+        new_width = width - left_trim - right_trim
+        if new_width <= 0:
+            return False
+
+        new_mask = (1 << new_width) - 1
+        glyph["width"] = new_width
+        glyph["bitmap"] = [((row >> right_trim) & new_mask) for row in rows]
+        return True
+
+    def auto_adjust_widths(self):
+        if not self.font or self.current_cp is None:
+            return
+
+        selected = self._get_selected_codepoints()
+        if not selected:
+            messagebox.showinfo("Auto Adjust Widths", "Select one or more glyphs first.")
+            return
+
+        changed, selected = self._apply_to_selected_glyphs(lambda _cp, glyph: self._trim_glyph_horizontal_space(glyph))
+        noun = "glyph" if len(selected) == 1 else "glyphs"
+        if changed == 0:
+            self._refresh_after_bulk_edit(selected, f"No side space to trim on {len(selected)} {noun}")
+            return
+        self._refresh_after_bulk_edit(selected, f"Auto adjusted widths on {changed} glyph{'s' if changed != 1 else ''}")
 
     # -------------------- shift pixels inside glyph box --------------------
     def shift_pixels(self, dx=0, dy=0):
         if not self.font or self.current_cp is None: return
         if dx == 0 and dy == 0: return
-        g = self.font.glyphs[self.current_cp]
-        w = int(g["width"])
-        h = int(g["height"])
-        newbmp = [int(row) for row in g["bitmap"]]
 
-        if dx < 0:
-            mask = (1 << (w - 1)) - 1 if w > 1 else 0
-            shifted = []
-            for row in newbmp:
-                newrow = (row & mask) << 1
-                newrow &= (1 << w) - 1
-                shifted.append(newrow)
-            newbmp = shifted
-        elif dx > 0:
-            newbmp = [row >> 1 for row in newbmp]
+        def apply_shift(_cp, glyph):
+            w = int(glyph["width"])
+            h = int(glyph["height"])
+            newbmp = [int(row) for row in glyph["bitmap"]]
 
-        if dy < 0:
-            newbmp = newbmp[1:] + [0]
-        elif dy > 0:
-            newbmp = [0] + newbmp[:-1]
+            if dx < 0:
+                mask = (1 << (w - 1)) - 1 if w > 1 else 0
+                shifted = []
+                for row in newbmp:
+                    newrow = (row & mask) << 1
+                    newrow &= (1 << w) - 1
+                    shifted.append(newrow)
+                newbmp = shifted
+            elif dx > 0:
+                newbmp = [row >> 1 for row in newbmp]
 
-        g["bitmap"] = newbmp[:h]
-        self.show_glyph(self.current_cp)
+            if dy < 0:
+                newbmp = newbmp[1:] + [0]
+            elif dy > 0:
+                newbmp = [0] + newbmp[:-1]
+
+            glyph["bitmap"] = newbmp[:h]
+            return True
+
+        changed, selected = self._apply_to_selected_glyphs(apply_shift)
+        if changed == 0:
+            return
+        self._refresh_after_bulk_edit(selected, f"Shifted pixels in {changed} glyph{'s' if changed != 1 else ''}")
+
+    def nudge_selected_offsets(self, dx=0, dy=0):
+        xoff = self._read_int_var(self.xoff_var, "Glyph x offset", -128, 127)
+        if xoff is None:
+            return
+        yoff = self._read_int_var(self.yoff_var, "Glyph y offset", -128, 127)
+        if yoff is None:
+            return
+
+        self.xoff_var.set(max(-128, min(127, xoff + dx)))
+        self.yoff_var.set(max(-128, min(127, yoff + dy)))
+        self.apply_selected_offsets()
+
+    def apply_selected_offsets(self):
+        if not self.font or self.current_cp is None:
+            return
+
+        selected = self._get_selected_codepoints()
+        if not selected:
+            messagebox.showinfo("Glyph Offsets", "Select one or more glyphs first.")
+            return
+
+        xoff = self._read_int_var(self.xoff_var, "Glyph x offset", -128, 127)
+        if xoff is None:
+            return
+        yoff = self._read_int_var(self.yoff_var, "Glyph y offset", -128, 127)
+        if yoff is None:
+            return
+
+        def apply_offsets(_cp, glyph):
+            changed = int(glyph.get("xoff", 0)) != xoff or int(glyph.get("yoff", 0)) != yoff
+            glyph["xoff"] = xoff
+            glyph["yoff"] = yoff
+            return changed
+
+        changed, selected = self._apply_to_selected_glyphs(apply_offsets)
+        noun = "glyph" if len(selected) == 1 else "glyphs"
+        changed_noun = "glyph" if changed == 1 else "glyphs"
+        if changed == 0:
+            self._refresh_after_bulk_edit(selected, f"Offsets already matched on {len(selected)} {noun}")
+            return
+        self._refresh_after_bulk_edit(selected, f"Updated offsets on {changed} {changed_noun}")
+
+    def apply_font_metrics(self):
+        font = self.font
+        if font is None:
+            return
+
+        ascent = self._read_int_var(self.ascent_var, "Font ascent", 0, 255)
+        if ascent is None:
+            return
+        descent = self._read_int_var(self.descent_var, "Font descent", 0, 255)
+        if descent is None:
+            return
+
+        font.ascent = ascent
+        font.descent = descent
+        self._update_font_summary()
+        if self.current_cp is not None and self.current_cp in font.glyphs:
+            self.show_glyph(self.current_cp)
+        else:
+            self.render_sample_strip()
+        self._set_status(f"Updated font metrics: ascent {ascent}, descent {descent}")
 
     def monospace_selected(self):
         font = self.font
@@ -1254,26 +1606,66 @@ class FontGUI:
             glyph["width"] = target_width
             glyph["bitmap"] = widened
 
-        self._set_status(f"Monospaced {len(selected)} glyphs to width {target_width} using {align} alignment")
         self._update_font_summary()
         if self.current_cp in selected:
             self.show_glyph(self.current_cp)
         else:
             self.show_glyph(selected[0])
+        self._set_status(f"Monospaced {len(selected)} glyphs to width {target_width} using {align} alignment")
+
+    def delete_selected_glyphs(self, _event=None):
+        font = self.font
+        if font is None:
+            return
+
+        selected = [cp for cp in self._get_selected_codepoints() if cp in font.glyphs]
+        if not selected:
+            messagebox.showinfo("Delete Glyphs", "Select one or more glyphs first.")
+            return
+
+        ordered = sorted(font.glyphs.keys())
+        first_index = min(ordered.index(cp) for cp in selected)
+        count = len(selected)
+        noun = "glyph" if count == 1 else "glyphs"
+        if not messagebox.askyesno("Delete Glyphs", f"Delete {count} selected {noun}?"):
+            return
+
+        to_delete = set(selected)
+        remaining = [cp for cp in ordered if cp not in to_delete]
+        next_focus = remaining[min(first_index, len(remaining) - 1)] if remaining else None
+
+        for cp in to_delete:
+            font.glyphs.pop(cp, None)
+        font.glyph_order = [cp for cp in font.glyph_order if cp not in to_delete]
+
+        self.populate_listbox(
+            selected_cps=[next_focus] if next_focus is not None else None,
+            active_cp=next_focus,
+        )
+        self._set_status(f"Deleted {count} {noun}")
 
     # -------------------- toggle pixel --------------------
     def canvas_click(self,e):
         if not self.font or self.current_cp is None: return
-        g = self.font.glyphs[self.current_cp]
         z = self.zoom
         x0 = getattr(self,'_draw_x0',20)
         y0 = getattr(self,'_draw_y0',20)
         cx = (e.x - x0)//z
         cy = (e.y - y0)//z
-        if cx < 0 or cy < 0 or cx >= g["width"] or cy >= g["height"]: return
-        mask = 1 << (g["width"]-1-cx)
-        g["bitmap"][cy] ^= mask
-        self.show_glyph(self.current_cp)
+
+        def apply_toggle(_cp, glyph):
+            width = int(glyph["width"])
+            height = int(glyph["height"])
+            if cx < 0 or cy < 0 or cx >= width or cy >= height:
+                return False
+            mask = 1 << (width - 1 - cx)
+            glyph["bitmap"][cy] ^= mask
+            return True
+
+        changed, selected = self._apply_to_selected_glyphs(apply_toggle)
+        if changed == 0:
+            return
+        self._refresh_after_bulk_edit(selected, f"Toggled pixel ({cx}, {cy}) in {changed} glyph{'s' if changed != 1 else ''}")
 
     # -------------------- export --------------------
     def export_hfm(self):
