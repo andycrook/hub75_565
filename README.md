@@ -2,6 +2,10 @@
 
 # HUB75 RGB565 Driver for Raspberry Pi Pico 2W.
 
+https://youtu.be/6Kgu8jMMThA
+
+[![Hub75 Driver](https://img.youtube.com/vi/6Kgu8jMMThA/0.jpg)](https://www.youtube.com/watch?v=6Kgu8jMMThA "Hub75 Driver")
+
 A MicroPython project for driving 64-pixel-high HUB75 LED matrix panels from a Raspberry Pi Pico 2 or Pico 2W.
 
 This repo includes:
