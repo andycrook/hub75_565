@@ -3,7 +3,7 @@ import time
 from machine import I2C, Pin
 
 from ds1307 import DS1307
-from hub75_565 import Hub75FrameBuffer, rgb565
+from hub75_565 import Hub75FrameBuffer, RGB565Sprite, rgb565
 from rlea_animation import RLEAnimation, read_rlea_header
 
 
@@ -16,8 +16,8 @@ def sleep_ms(value):
     else:
         time.sleep(value / 1000.0)
 
-
-DEFAULT_ANIMATION = "/anim/WHO_Vortex.rlea"
+DEFAULT_ANIMATION = "/anim/White_Ring.rlea"
+#DEFAULT_ANIMATION = "/anim/WHO_Vortex.rlea"
 #DEFAULT_ANIMATION = "/anim/kirkslap_128_BMP.rlea"
 DEFAULT_LOOP = True
 
@@ -35,6 +35,13 @@ SHADOW_COLOR = rgb565(0, 0, 0)
 
 TOP_BAR_HEIGHT = 10
 BOTTOM_BAR_HEIGHT = 10
+
+
+class _AnimationSurface(RGB565Sprite):
+    def show(self):
+        return None
+
+    refresh = show
 
 
 def _init_rtc():
@@ -79,7 +86,8 @@ def run(filename=DEFAULT_ANIMATION, loop=DEFAULT_LOOP):
     rtc = _init_rtc()
     header = read_rlea_header(filename)
     display = Hub75FrameBuffer(width=header.width, height=header.height)
-    animation = RLEAnimation(filename, display)
+    animation_surface = _AnimationSurface(header.width, header.height)
+    animation = RLEAnimation(filename, animation_surface)
 
     rtc_datetime = rtc.datetime
     time_text, date_text = _format_clock_strings(rtc_datetime)
@@ -87,6 +95,11 @@ def run(filename=DEFAULT_ANIMATION, loop=DEFAULT_LOOP):
 
     try:
         animation.play(loop=loop)
+        animation.update(show=False)
+        display.rgb565_buffer[:] = animation_surface.rgb565_buffer
+        _draw_clock_overlay(display, time_text, date_text)
+        display.show()
+
         while True:
             frame_changed = animation.update(show=False)
 
@@ -98,6 +111,7 @@ def run(filename=DEFAULT_ANIMATION, loop=DEFAULT_LOOP):
                 time_text, date_text = _format_clock_strings(rtc_datetime)
 
             if frame_changed or second_changed:
+                display.rgb565_buffer[:] = animation_surface.rgb565_buffer
                 _draw_clock_overlay(display, time_text, date_text)
                 display.show()
             else:
