@@ -4,7 +4,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import io
 import os
+import shutil
 import struct
+import subprocess
+import tempfile
 from typing import Iterable, Sequence
 
 try:
@@ -33,8 +36,8 @@ FORMAT_COMPRESSION_MIXED_RLE = 0
 FRAME_FLAG_KEYFRAME = 1 << 0
 FRAME_FLAG_DELTA = 1 << 1
 
-SUPPORTED_WIDTHS = {64, 128}
-SUPPORTED_HEIGHT = 64
+MAX_GEOMETRY_VALUE = 0xFFFF
+MAX_FRAME_PIXELS = 0xFFFF
 
 RESAMPLE_NAMES = (
     "nearest",
@@ -54,19 +57,94 @@ SOURCE_EXTENSIONS = {
     ".webp",
 }
 
+VIDEO_EXTENSIONS = {
+    ".avi",
+    ".m4v",
+    ".mkv",
+    ".mov",
+    ".mp4",
+    ".webm",
+}
+
 
 def _require_pillow():
     if Image is None or ImageEnhance is None or ImageOps is None or ImageSequence is None:
         raise RuntimeError("Pillow is required for the RLEA desktop encoder tool")
 
 
+def _require_ffmpeg():
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        raise RuntimeError("ffmpeg is required for video inputs and must be on PATH")
+    return ffmpeg
+
+
+def _emit_progress(progress_callback, *, mode=None, value=None, message=None):
+    if progress_callback is None:
+        return
+
+    payload = {}
+    if mode is not None:
+        payload["mode"] = str(mode)
+    if value is not None:
+        payload["value"] = float(value)
+    if message is not None:
+        payload["message"] = str(message)
+    progress_callback(payload)
+
+
+def _progress_value(start: float, end: float, completed: int, total: int) -> float:
+    if total <= 0:
+        return float(end)
+    clamped = min(max(0, int(completed)), int(total))
+    return float(start) + ((float(end) - float(start)) * (clamped / float(total)))
+
+
+def _ffmpeg_scale_flags(name: str) -> str:
+    lookup = {
+        "nearest": "neighbor",
+        "box": "area",
+        "bilinear": "bilinear",
+        "hamming": "bicubic",
+        "bicubic": "bicubic",
+        "lanczos": "lanczos",
+    }
+    return lookup.get(str(name).lower(), "bicubic")
+
+
+def _video_filter_graph(target_fps: int, width: int, height: int, resize_mode: str, resample_filter: str, background_rgb: tuple[int, int, int]) -> str:
+    fps = max(1, int(target_fps))
+    resize_mode_key = str(resize_mode).lower()
+    scale_flags = _ffmpeg_scale_flags(resample_filter)
+    background_hex = "%02x%02x%02x" % tuple(int(value) & 0xFF for value in background_rgb)
+
+    filters = [f"fps={fps}"]
+    if resize_mode_key == "stretch":
+        filters.append(f"scale={width}:{height}:flags={scale_flags}")
+    elif resize_mode_key == "cover":
+        filters.append(
+            f"scale={width}:{height}:flags={scale_flags}:force_original_aspect_ratio=increase"
+        )
+        filters.append(f"crop={width}:{height}")
+    else:
+        filters.append(
+            f"scale={width}:{height}:flags={scale_flags}:force_original_aspect_ratio=decrease"
+        )
+        filters.append(
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=0x{background_hex}"
+        )
+    return ",".join(filters)
+
+
 def validate_geometry(width: int, height: int) -> tuple[int, int]:
     width_val = int(width)
     height_val = int(height)
-    if width_val not in SUPPORTED_WIDTHS:
-        raise ValueError("width must be 64 or 128")
-    if height_val != SUPPORTED_HEIGHT:
-        raise ValueError("height must be 64")
+    if width_val <= 0 or height_val <= 0:
+        raise ValueError("width and height must be > 0")
+    if width_val > MAX_GEOMETRY_VALUE or height_val > MAX_GEOMETRY_VALUE:
+        raise ValueError("width and height must be <= 65535")
+    if width_val * height_val > MAX_FRAME_PIXELS:
+        raise ValueError("frame area must be <= 65535 pixels")
     return width_val, height_val
 
 
@@ -119,6 +197,9 @@ class EncoderOptions:
     resize_mode: str = "contain"
     resample_filter: str = "bicubic"
     background_rgb: tuple[int, int, int] = (0, 0, 0)
+    zoom: float = 1.0
+    pan_x: float = 0.0
+    pan_y: float = 0.0
     adjustments: ImageAdjustments = field(default_factory=ImageAdjustments)
     delta_gap_tolerance: int = 0
 
@@ -243,22 +324,73 @@ def apply_adjustments(image, adjustments: ImageAdjustments):
     return working
 
 
-def fit_frame(image, width: int, height: int, *, resize_mode: str, resample_filter: str, background_rgb: tuple[int, int, int]):
+def _normalize_zoom(value: float) -> float:
+    zoom_value = float(value)
+    if zoom_value <= 0.0:
+        raise ValueError("zoom must be > 0")
+    return zoom_value
+
+
+def _normalize_pan(value: float) -> float:
+    pan_value = float(value)
+    if pan_value < -1.0:
+        return -1.0
+    if pan_value > 1.0:
+        return 1.0
+    return pan_value
+
+
+def _placement_offset(container_size: int, content_size: int, pan_value: float) -> int:
+    span = int(container_size) - int(content_size)
+    return int(round(span * ((float(pan_value) + 1.0) * 0.5)))
+
+
+def _video_prescale_enabled(options: EncoderOptions) -> bool:
+    return (
+        abs(_normalize_zoom(options.zoom) - 1.0) < 1e-9
+        and abs(_normalize_pan(options.pan_x)) < 1e-9
+        and abs(_normalize_pan(options.pan_y)) < 1e-9
+    )
+
+
+def fit_frame(
+    image,
+    width: int,
+    height: int,
+    *,
+    resize_mode: str,
+    resample_filter: str,
+    background_rgb: tuple[int, int, int],
+    zoom: float = 1.0,
+    pan_x: float = 0.0,
+    pan_y: float = 0.0,
+):
     _require_pillow()
     resample = _resample_filter(resample_filter)
     rgba = image.convert("RGBA")
     resize_mode_key = str(resize_mode).lower()
 
+    zoom_value = _normalize_zoom(zoom)
+    pan_x_value = _normalize_pan(pan_x)
+    pan_y_value = _normalize_pan(pan_y)
+    source_width, source_height = rgba.size
+
     if resize_mode_key == "stretch":
-        fitted = rgba.resize((width, height), resample=resample)
-    elif resize_mode_key == "cover":
-        fitted = ImageOps.fit(rgba, (width, height), method=resample, centering=(0.5, 0.5))
+        scaled_width = max(1, int(round(width * zoom_value)))
+        scaled_height = max(1, int(round(height * zoom_value)))
     else:
-        scaled = ImageOps.contain(rgba, (width, height), method=resample)
-        fitted = Image.new("RGBA", (width, height), background_rgb + (255,))
-        x = (width - scaled.width) // 2
-        y = (height - scaled.height) // 2
-        fitted.alpha_composite(scaled, (x, y))
+        if resize_mode_key == "cover":
+            base_scale = max(width / float(source_width), height / float(source_height))
+        else:
+            base_scale = min(width / float(source_width), height / float(source_height))
+        scaled_width = max(1, int(round(source_width * base_scale * zoom_value)))
+        scaled_height = max(1, int(round(source_height * base_scale * zoom_value)))
+
+    scaled = rgba.resize((scaled_width, scaled_height), resample=resample)
+    fitted = Image.new("RGBA", (width, height), background_rgb + (255,))
+    x = _placement_offset(width, scaled_width, pan_x_value)
+    y = _placement_offset(height, scaled_height, pan_y_value)
+    fitted.paste(scaled, (x, y), scaled)
     return fitted.convert("RGB")
 
 
@@ -311,6 +443,71 @@ def _load_image_file(path: Path):
         return [source_image.convert("RGBA")], [None], "image"
 
 
+def _load_video_file(
+    path: Path,
+    target_fps: int,
+    width: int,
+    height: int,
+    resize_mode: str,
+    resample_filter: str,
+    background_rgb: tuple[int, int, int],
+    pre_scale: bool = True,
+    progress_callback=None,
+):
+    _require_pillow()
+    ffmpeg = _require_ffmpeg()
+    if pre_scale:
+        filter_graph = _video_filter_graph(
+            target_fps,
+            width,
+            height,
+            resize_mode,
+            resample_filter,
+            background_rgb,
+        )
+        extract_message = "Extracting and pre-scaling video frames with ffmpeg..."
+    else:
+        filter_graph = f"fps={max(1, int(target_fps))}"
+        extract_message = "Extracting video frames with ffmpeg..."
+
+    with tempfile.TemporaryDirectory(prefix="rlea_video_") as temp_dir:
+        output_pattern = str(Path(temp_dir) / "frame_%06d.png")
+        _emit_progress(
+            progress_callback,
+            mode="indeterminate",
+            message=extract_message,
+        )
+        result = subprocess.run(
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-i",
+                str(path),
+                "-vf",
+                filter_graph,
+                "-vsync",
+                "0",
+                output_pattern,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            message = (result.stderr or "").strip() or "ffmpeg failed to decode video"
+            raise RuntimeError(message)
+
+        _emit_progress(
+            progress_callback,
+            mode="determinate",
+            value=8.0,
+            message="Loading extracted video frames...",
+        )
+        frames, _durations_ms, _kind = _load_directory_frames(Path(temp_dir))
+        return frames, [None] * len(frames), "video"
+
+
 def _normalize_animated_frames(frames: Sequence[object], durations_ms: Sequence[int | None], target_fps: int) -> list[object]:
     if len(frames) <= 1:
         return [frame.copy() for frame in frames]
@@ -334,34 +531,63 @@ def _normalize_animated_frames(frames: Sequence[object], durations_ms: Sequence[
     return normalized
 
 
-def prepare_animation_source(source_path: str | os.PathLike[str], options: EncoderOptions) -> PreparedAnimation:
+def prepare_animation_source(source_path: str | os.PathLike[str], options: EncoderOptions, progress_callback=None) -> PreparedAnimation:
     _require_pillow()
     width, height = validate_geometry(options.width, options.height)
     path = Path(source_path)
     if not path.exists():
         raise FileNotFoundError(path)
 
+    pre_scaled = False
+    _emit_progress(progress_callback, mode="indeterminate", message="Loading source frames...")
     if path.is_dir():
         frames, durations_ms, kind = _load_directory_frames(path)
-        normalized_frames = [frame.copy() for frame in frames]
+        normalized_frames = frames
+    elif path.suffix.lower() in VIDEO_EXTENSIONS:
+        pre_scaled = _video_prescale_enabled(options)
+        frames, durations_ms, kind = _load_video_file(
+            path,
+            options.fps,
+            width,
+            height,
+            options.resize_mode,
+            options.resample_filter,
+            options.background_rgb,
+            pre_scale=pre_scaled,
+            progress_callback=progress_callback,
+        )
+        normalized_frames = frames
     else:
         frames, durations_ms, kind = _load_image_file(path)
         normalized_frames = _normalize_animated_frames(frames, durations_ms, options.fps)
 
     preview_frames = []
     rgb565_frames = []
-    for frame in normalized_frames:
-        fitted = fit_frame(
-            frame,
-            width,
-            height,
-            resize_mode=options.resize_mode,
-            resample_filter=options.resample_filter,
-            background_rgb=options.background_rgb,
-        )
+    total_frames = max(1, len(normalized_frames))
+    for index, frame in enumerate(normalized_frames):
+        if pre_scaled:
+            fitted = frame
+        else:
+            fitted = fit_frame(
+                frame,
+                width,
+                height,
+                resize_mode=options.resize_mode,
+                resample_filter=options.resample_filter,
+                background_rgb=options.background_rgb,
+                zoom=options.zoom,
+                pan_x=options.pan_x,
+                pan_y=options.pan_y,
+            )
         adjusted = apply_adjustments(fitted, options.adjustments)
         preview_frames.append(adjusted)
         rgb565_frames.append(image_to_rgb565_words(adjusted))
+        _emit_progress(
+            progress_callback,
+            mode="determinate",
+            value=_progress_value(10.0, 55.0, index + 1, total_frames),
+            message="Preparing frame %d/%d..." % (index + 1, total_frames),
+        )
 
     return PreparedAnimation(
         source_path=path,
@@ -541,7 +767,7 @@ def decode_delta_payload(payload: bytes, previous_pixels: Sequence[int], total_p
     return tuple(output)
 
 
-def encode_animation(prepared: PreparedAnimation, options: EncoderOptions) -> EncodedAnimation:
+def encode_animation(prepared: PreparedAnimation, options: EncoderOptions, progress_callback=None) -> EncodedAnimation:
     width, height = validate_geometry(prepared.width, prepared.height)
     total_pixels = width * height
     raw_frame_bytes = total_pixels * 2
@@ -551,6 +777,7 @@ def encode_animation(prepared: PreparedAnimation, options: EncoderOptions) -> En
     previous_pixels: tuple[int, ...] | None = None
     keyframe_interval = max(1, int(options.keyframe_interval))
     use_any_delta = False
+    total_frames = max(1, len(prepared.rgb565_frames))
     for index, pixels in enumerate(prepared.rgb565_frames):
         keyframe_payload = encode_keyframe_payload(pixels)
         frame_flags = FRAME_FLAG_KEYFRAME
@@ -586,6 +813,12 @@ def encode_animation(prepared: PreparedAnimation, options: EncoderOptions) -> En
             )
         )
         previous_pixels = tuple(int(value) & 0xFFFF for value in pixels)
+        _emit_progress(
+            progress_callback,
+            mode="determinate",
+            value=_progress_value(55.0, 95.0, index + 1, total_frames),
+            message="Encoding frame %d/%d..." % (index + 1, total_frames),
+        )
 
     flags = FORMAT_COMPRESSION_MIXED_RLE << FORMAT_FLAG_COMPRESSION_SHIFT
     if use_any_delta:
@@ -593,6 +826,7 @@ def encode_animation(prepared: PreparedAnimation, options: EncoderOptions) -> En
     else:
         flags |= FORMAT_FLAG_KEYFRAME_ONLY
 
+    _emit_progress(progress_callback, mode="determinate", value=97.0, message="Finalizing frame table...")
     frame_table_offset = HEADER_STRUCT.size
     offset = frame_table_offset + len(frame_records) * FRAME_TABLE_ENTRY_STRUCT.size
     frame_offsets = []
