@@ -45,10 +45,12 @@ TEXT_MARQUEE_SPEED_MODE_TIME = const(1)
 TEXT_MARQUEE_SPEED_SHIFT = const(8)
 TEXT_MARQUEE_SPEED_UNIT = const(1 << TEXT_MARQUEE_SPEED_SHIFT)
 
+# Reduce these to fit your panel
 PIO_FREQ_LED = const(124_000_000)
-PIO_FREQ_ROW = const(124_000_000)
+PIO_FREQ_ROW = const(124_000_000)    # reduce to 80_000_000 if your panel has vertical striping
+
 PIO_FREQ_BRIGHT = const(25_000_000)
-MACHINE_FREQ = const(250_000_000)
+MACHINE_FREQ = const(250_000_000) # this overclocks your pico faster for more speed
 SHOW_WAIT_TIMEOUT_MS = const(250)
 
 
